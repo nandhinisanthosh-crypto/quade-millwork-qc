@@ -6,3 +6,5 @@ openai
 python-dotenv
 jinja2
 openpyxl
+Pillow
+numpy
