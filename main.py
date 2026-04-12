@@ -220,6 +220,22 @@ async def delete_drawing(filename: str):
         
     return JSONResponse(status_code=404, content={"message": "File not found"})
 
+@app.get("/api/results/{filename}")
+async def get_results(filename: str):
+    """Fetch previously saved analysis results for a drawing."""
+    stem = filename[:-4] if filename.lower().endswith('.pdf') else filename
+    results_path = os.path.join(UPLOADS_DIR, "debug_logs", f"{stem}_results.json")
+    
+    if os.path.exists(results_path):
+        try:
+            with open(results_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return JSONResponse(content=data)
+        except Exception as e:
+            logger.error(f"Error reading results for {filename}: {e}")
+    
+    return JSONResponse(status_code=404, content={"message": "No results found"})
+
 # ──────────────────────────────────────────────
 # WEBSOCKET ANALYSIS PIPELINE
 # ──────────────────────────────────────────────
@@ -658,14 +674,29 @@ async def analyze_via_ws(ws: WebSocket):
 
         # ── COMPLETE ─────────────────────────────────────────────────────
         logger.info(f"Analysis complete for {filename}. Findings: {len(frontend_errors)}")
-        await ws_send(ws, "complete", "Analysis complete!", data={
+        
+        results_data = {
             "errors": frontend_errors,
             "summary": {"total": len(frontend_errors), "fails": sum(1 for e in frontend_errors if e.get("severity") == "FAIL")},
             "page_count": len(page_images),
-            "marked_up_pages": marked_up_pages, # Map of {page_index: url}
+            "marked_up_pages": marked_up_pages, 
             "marked_up_pdf_url": marked_up_pdf_url,
             "stem": stem
-        })
+        }
+
+        # PERSIST RESULTS TO DISK
+        try:
+            results_path = os.path.join(UPLOADS_DIR, "debug_logs", f"{stem}_results.json")
+            with open(results_path, "w", encoding="utf-8") as f:
+                json.dump(results_data, f, indent=2)
+            logger.info(f"Results persisted to: {results_path}")
+        except Exception as e:
+            logger.error(f"Failed to persist results: {e}")
+
+        await ws_send(ws, "complete", "Analysis complete!", data=results_data)
+        
+        # Small sleep to ensure final packet is flushed before socket closes
+        await asyncio.sleep(1.0)
 
     except WebSocketDisconnect:
         logger.warning("WebSocket client disconnected during analysis.")

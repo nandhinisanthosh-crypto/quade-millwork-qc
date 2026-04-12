@@ -76,6 +76,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 currentPageIdx = 0;
                 showPage(0);
                 document.querySelector('.empty-state').style.display = 'none';
+
+                // NEW: Try to load existing results from the server
+                tryLoadExistingResults(first.filename);
             } else {
                 drawingImage.style.display = 'none';
                 document.querySelector('.empty-state').style.display = 'flex';
@@ -84,6 +87,45 @@ document.addEventListener('DOMContentLoaded', () => {
                 errorCountBadge.textContent = '0 Issues';
                 pageNav.style.display = 'none';
             }
+        }
+    }
+
+    async function tryLoadExistingResults(filename) {
+        try {
+            const res = await fetch(`/api/results/${encodeURIComponent(filename)}`);
+            if (res.ok) {
+                const data = await res.json();
+                console.info('[Persistence] Loading existing results for', filename);
+                
+                currentErrors = data.errors || [];
+                markedUpPdfUrl = data.marked_up_pdf_url || '';
+                
+                // Update page URLs to use marked-up ones if available
+                if (data.marked_up_pages) {
+                    for (const [pIdx, url] of Object.entries(data.marked_up_pages)) {
+                        allPageUrls[pIdx] = url;
+                    }
+                } else if (data.stem && data.page_count) {
+                    allPageUrls = [];
+                    for (let i = 0; i < data.page_count; i++) {
+                        allPageUrls.push(`/drawings/${data.stem}_page_${i}.png`);
+                    }
+                }
+
+                // Initial show once data is in
+                showPage(0);
+                renderErrors();
+                
+                // If there are results, show the Count Badge correctly
+                errorCountBadge.textContent = `${currentErrors.length} Issues`;
+            } else {
+                // Clear any leftover state if no results found
+                currentErrors = [];
+                markedUpPdfUrl = '';
+                renderErrors();
+            }
+        } catch (err) {
+            console.warn('Failed to fetch existing results:', err);
         }
     }
 
