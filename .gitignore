@@ -1,0 +1,21 @@
+# Environment & Python
+.env
+__pycache__/
+venv/
+*.pyc
+
+# Local Data & Logs
+uploads/
+logs/
+debug_scout_results/
+debug_sniper_calls/
+debug_sniper_responses/
+debug_crops/
+debug_logs/
+test_grid_output.png
+dummy_drawing.png
+
+# IDEs
+.vscode/
+.idea/
+.DS_Store

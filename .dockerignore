@@ -1,0 +1,19 @@
+# Ignore local environment
+venv/
+.env
+__pycache__/
+*.pyc
+
+# Ignore local data
+uploads/
+logs/
+debug_scout_results/
+debug_sniper_calls/
+debug_sniper_responses/
+debug_crops/
+debug_logs/
+
+# Ignore system files
+.DS_Store
+.git/
+.vscode/
