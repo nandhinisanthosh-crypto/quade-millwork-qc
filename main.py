@@ -42,13 +42,28 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 app = FastAPI(title="Millwork QC Automation")
 
-STATIC_DIR    = os.path.join(BASE_DIR, "static")
-TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
-UPLOADS_DIR   = os.path.join(BASE_DIR, "uploads")
-STANDARDS_DIR = os.path.join(UPLOADS_DIR, "standards")
-DRAWINGS_DIR  = os.path.join(UPLOADS_DIR, "drawings")
+# Define all directories used by the app
+STATIC_DIR      = os.path.join(BASE_DIR, "static")
+TEMPLATES_DIR   = os.path.join(BASE_DIR, "templates")
+UPLOADS_DIR     = os.path.join(BASE_DIR, "uploads")
+STANDARDS_DIR   = os.path.join(UPLOADS_DIR, "standards")
+DRAWINGS_DIR    = os.path.join(UPLOADS_DIR, "drawings")
 
-for d in [STATIC_DIR, TEMPLATES_DIR, STANDARDS_DIR, DRAWINGS_DIR]:
+# Audit & Debug directories inside UPLOADS for persistence
+DEBUG_DIR_NAMES = [
+    "debug_scout_results",
+    "debug_sniper_calls",
+    "debug_sniper_responses",
+    "debug_crops",
+    "debug_logs"
+]
+
+all_dirs = [STATIC_DIR, TEMPLATES_DIR, STANDARDS_DIR, DRAWINGS_DIR]
+for d_name in DEBUG_DIR_NAMES:
+    all_dirs.append(os.path.join(UPLOADS_DIR, d_name))
+
+# Create them all recursively
+for d in all_dirs:
     os.makedirs(d, exist_ok=True)
 
 try:
