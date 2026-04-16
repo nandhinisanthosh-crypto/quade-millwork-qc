@@ -346,6 +346,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Ensure layer is correctly positioned before rendering children
         positionMarkupLayer();
         const { renderW, renderH } = getRenderedImageBounds();
+        console.info(`[QC] Rendering ${currentErrors.length} findings on ${renderW}x${renderH} canvas.`);
 
         currentErrors.forEach((error, index) => {
             const onThisPage = (error.page_index ?? 0) === currentPageIdx;
@@ -420,7 +421,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const lineColor = isReview ? '#f97316' : '#ef4444';
 
                 leaderContainer.innerHTML = `
-                    <svg class="leader-svg" style="position:absolute; left:0; top:0; width:100%; height:100%; overflow:visible; pointer-events:none;">
+                    <svg class="leader-svg" width="${renderW}" height="${renderH}" 
+                         viewBox="0 0 ${renderW} ${renderH}"
+                         style="position:absolute; left:0; top:0; width:100%; height:100%; overflow:visible; pointer-events:none;">
                         <path d="M ${startX} ${startY} L ${scx + (dx * 0.4)} ${startY} L ${scx + dx} ${scy + dy}" 
                                fill="none" stroke="${lineColor}" stroke-width="2" />
                     </svg>
@@ -515,8 +518,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function positionMarkupLayer() {
-        if (!drawingImage.naturalWidth) return;
+        if (!drawingImage.naturalWidth) {
+            console.warn('[QC] positionMarkupLayer: naturalWidth not ready, retrying in 100ms...');
+            setTimeout(positionMarkupLayer, 100);
+            return;
+        }
         const { renderW, renderH, offsetX, offsetY } = getRenderedImageBounds();
+        console.info(`[QC] Positioning Markup Layer: ${renderW.toFixed(0)}x${renderH.toFixed(0)} at offset (${offsetX.toFixed(0)}, ${offsetY.toFixed(0)})`);
+        
         markupLayer.style.width     = `${renderW}px`;
         markupLayer.style.height    = `${renderH}px`;
         markupLayer.style.left      = `${offsetX}px`;

@@ -37,10 +37,21 @@ logger = logging.getLogger("millwork_qc")
 # ──────────────────────────────────────────────
 # ENV & APP
 # ──────────────────────────────────────────────
+from fastapi.middleware.cors import CORSMiddleware
+
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 app = FastAPI(title="Millwork QC Automation")
+
+# Production CORS safety
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Define all directories used by the app
 STATIC_DIR      = os.path.join(BASE_DIR, "static")
