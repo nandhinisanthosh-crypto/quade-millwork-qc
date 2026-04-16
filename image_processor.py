@@ -100,8 +100,8 @@ def get_target_crop(image: Image.Image, bbox_pct: list[float], crop_size=768):
 
 def draw_markups_on_image(image_path: str, markup_items: list[dict], output_path: str):
     """
-    Draws bounding boxes and labels on an image.
-    markup_items: list of { 'id': 'F-001', 'bbox_pct': [x0,y0,x1,y1] }
+    Draws bounding boxes, leader lines, and descriptive labels on an image.
+    markup_items: list of { 'id': 'F-001', 'bbox_pct': [x0,y0,x1,y1], 'rule_id': '...' }
     """
     try:
         with Image.open(image_path).convert("RGB") as img:
@@ -110,6 +110,15 @@ def draw_markups_on_image(image_path: str, markup_items: list[dict], output_path
             
             # Use a slightly thicker line for visibility
             line_width = max(3, int(min(w, h) / 400))
+            
+            # Try to load a clean font, fallback to default
+            try:
+                # Common Windows path for Arial
+                font_id = ImageFont.truetype("arial.ttf", size=max(20, int(min(w, h) / 60)))
+                font_rule = ImageFont.truetype("arial.ttf", size=max(14, int(min(w, h) / 85)))
+            except:
+                font_id = ImageFont.load_default()
+                font_rule = ImageFont.load_default()
             
             for item in markup_items:
                 if not item.get("bbox_pct"): continue
@@ -121,16 +130,68 @@ def draw_markups_on_image(image_path: str, markup_items: list[dict], output_path
                 x1 = (bx[2] / 100.0) * w
                 y1 = (bx[3] / 100.0) * h
                 
-                shape = [x0, y0, x1, y1]
+                # Draw bounding box
+                draw.rectangle([x0, y0, x1, y1], outline="#ef4444", width=line_width)
                 
-                # Draw red box
-                draw.rectangle(shape, outline="red", width=line_width)
+                # ── LEADER LINE & LABEL ──────────────────────────────────
+                # Determine placement: try to avoid edges
+                cx = (x0 + x1) / 2
+                cy = (y0 + y1) / 2
                 
-                # Draw Label Background
-                label = item.get("id", "??")
-                # Simple rectangle for label text
-                draw.rectangle([x0, y0 - 30, x0 + 80, y0], fill="red")
-                draw.text((x0 + 5, y0 - 25), label, fill="white")
+                # Determine placement: try to avoid edges, using proportional offsets
+                dx = int(w * 0.12) if cx < w * 0.7 else -int(w * 0.12)
+                dy = -int(h * 0.1) if cy > h * 0.4 else int(h * 0.1)
+                
+                elbow_x = cx + dx
+                elbow_y = cy + dy
+                
+                # Draw elbow leader line (Starting from the box edge for a clean look)
+                start_x = x1 if dx > 0 else x0
+                draw.line([(start_x, cy), (elbow_x, cy), (elbow_x, elbow_y)], fill="#ef4444", width=line_width)
+                
+                # Standardized Labeling: [F-001] Rule-ID
+                fid = item.get("id", "F-???")
+                rid = item.get("rule_id", "UNCATEGORIZED")
+                full_label = f"[{fid}] {rid}"
+
+                # Font sizing based on image resolution
+                font_size = max(16, int(min(w, h) / 48))
+                try:
+                    # Try to load a clean font, fallback to default
+                    font_id = ImageFont.truetype("arial.ttf", font_size)
+                except:
+                    font_id = ImageFont.load_default()
+
+                # Calculate rounded label box
+                try:
+                    # PIL 10.0.0+ uses getbbox/getmask
+                    left, top, right, bottom = draw.textbbox((0, 0), full_label, font=font_id)
+                    tw, th = right - left, bottom - top
+                except AttributeError:
+                    # Older PIL
+                    tw, th = draw.textsize(full_label, font=font_id)
+
+                padding_h, padding_v = 12, 8
+                
+                # Dynamic positioning based on dx
+                if dx > 0:
+                    lx0 = elbow_x
+                else:
+                    lx0 = elbow_x - tw - (padding_h * 2)
+                    
+                ly0 = elbow_y - (th / 2) - padding_v
+                lx1 = lx0 + tw + (padding_h * 2)
+                ly1 = ly0 + th + (padding_v * 2)
+                
+                # Draw rounded label background (White with Red Border)
+                try:
+                    draw.rounded_rectangle([lx0, ly0, lx1, ly1], radius=8, fill="white", outline="#ef4444", width=2)
+                except AttributeError:
+                    # Fallback for older PIL
+                    draw.rectangle([lx0, ly0, lx1, ly1], fill="white", outline="#ef4444", width=2)
+                
+                # Draw text (Red)
+                draw.text((lx0 + padding_h, ly0 + padding_v), full_label, fill="#ef4444", font=font_id)
                 
             img.save(output_path)
             return True

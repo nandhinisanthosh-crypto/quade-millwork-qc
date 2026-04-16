@@ -7,15 +7,27 @@ import fitz  # PyMuPDF
 import os
 
 
-def add_callout(page, rect, text, color):
-    """Draw a text callout box near the flagged rectangle."""
-    pw = page.rect.width
-    ph = page.rect.height
-    x = min(rect.x1 + 6, pw - 260)
-    y = min(rect.y1 + 6, ph - 50)
-    box = fitz.Rect(x, y, x + 240, y + 45)
-    page.draw_rect(box, color=(0, 0, 0), fill=(1, 1, 1), width=0.6)
-    page.insert_textbox(box, text, fontsize=7, color=color)
+def draw_annotated_callout(page, rect, finding_id, rule_id, requirement, color):
+    """Draws a premium two-line callout."""
+    ax, ay = rect.x0, rect.y0
+    dx = -60 if ax > 60 else 60
+    dy = -40 if ay > 40 else 40
+    
+    p1 = fitz.Point(ax, ay)
+    p2 = fitz.Point(ax + dx, ay + dy)
+    page.draw_line(p1, p2, color=color, width=1.2)
+    
+    # Text Block
+    bw, bh = 150, 24
+    bx = p2.x if dx > 0 else p2.x - bw
+    by = p2.y - (bh / 2)
+    box = fitz.Rect(bx, by, bx + bw, by + bh)
+    
+    page.draw_rect(box, color=color, fill=(1,1,1), width=0.8)
+    
+    # Combine ID, Rule and Requirement
+    full_text = f"[{finding_id}] {rule_id}\n{requirement} required"
+    page.insert_textbox(box, full_text, fontsize=7, color=color, align=1)
 
 
 def apply_markups(pdf_path: str, markup_plan: any, output_path: str):
@@ -98,13 +110,11 @@ def apply_markups(pdf_path: str, markup_plan: any, output_path: str):
             # Draw rectangle outline
             page.draw_rect(rect, color=color, width=2.0)
 
-            # Add ID Label (Like the UI red tag)
-            # Safety check: if box is at the very top, put label inside/below
-            label_y0 = y0 - 15 if y0 > 20 else y0 + 5
-            label_rect = fitz.Rect(x0, label_y0, x0 + 40, label_y0 + 15)
-            
-            page.draw_rect(label_rect, color=color, fill=color, width=0)
-            page.insert_textbox(label_rect, finding_id, fontsize=8, color=(1, 1, 1), align=1)
+            # --- UPDATED: Premium Annotated Callout ---
+            requirement = m.get("requirement")
+            rule_id = m.get("rule_id", "ERROR")
+            if requirement:
+                draw_annotated_callout(page, rect, finding_id, rule_id, requirement, color)
 
             applied += 1
 

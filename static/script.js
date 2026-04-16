@@ -151,7 +151,9 @@ document.addEventListener('DOMContentLoaded', () => {
         idx = Math.max(0, Math.min(idx, allPageUrls.length - 1));
         currentPageIdx = idx;
 
-        drawingImage.src = allPageUrls[idx];
+        // Add timestamp to force reload and avoid browser caching of drawing pages
+        const cacheBuster = `?t=${Date.now()}`;
+        drawingImage.src = allPageUrls[idx] + cacheBuster;
         drawingImage.style.display = 'block';
 
         // Show page nav only if >1 page
@@ -333,8 +335,6 @@ document.addEventListener('DOMContentLoaded', () => {
         errorsTableBody.innerHTML = '';
         markupLayer.innerHTML = '';
 
-        // Filter errors to only those on the current page
-        const pageErrors = currentErrors.filter(e => (e.page_index ?? 0) === currentPageIdx);
         const totalIssues = currentErrors.length;
         errorCountBadge.textContent = `${totalIssues} Issues`;
 
@@ -343,7 +343,10 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // Always show all errors in the table
+        // Ensure layer is correctly positioned before rendering children
+        positionMarkupLayer();
+        const { renderW, renderH } = getRenderedImageBounds();
+
         currentErrors.forEach((error, index) => {
             const onThisPage = (error.page_index ?? 0) === currentPageIdx;
             const tr = document.createElement('tr');
@@ -366,15 +369,9 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
             errorsTableBody.appendChild(tr);
 
-            // Only draw bounding boxes for errors on the current page
-            if (!onThisPage) return;
-            // Also skip if the backend indicated there is no bounding box
-            if (error.has_bbox === false) return;
+            if (!onThisPage || error.has_bbox === false) return;
 
-            // ── Coordinate Scaling ───────────────────────────────────────
-            // Backend converted pct→pixels in full image space (img_w × img_h).
-            // We just scale from full-image-pixels to the actual rendered image area.
-            const { renderW, renderH } = getRenderedImageBounds();
+            // Coordinate Scaling
             const imgW   = error.img_w || drawingImage.naturalWidth  || renderW;
             const imgH   = error.img_h || drawingImage.naturalHeight || renderH;
             const scaleX = renderW / imgW;
@@ -384,42 +381,94 @@ document.addEventListener('DOMContentLoaded', () => {
             const sy = error.y      * scaleY;
             const sw = Math.max(error.width  * scaleX, 24);
             const sh = Math.max(error.height * scaleY, 24);
+            const scx = sx + (sw / 2);
+            const scy = sy + (sh / 2);
 
             const box = document.createElement('div');
             box.className = 'bounding-box';
             box.dataset.index = index;
 
-            // Color by result type: High is always red, Review is orange (if not High)
             const isReview = (error.standard_ref || '').includes('REVIEW');
             if (error.severity === 'HIGH') {
-                box.classList.remove('review'); // Default is red
+                box.classList.remove('review');
             } else if (isReview) {
                 box.classList.add('review');
             }
 
             box.style.left   = `${sx}px`;
             box.style.top    = `${sy}px`;
-            box.style.width  = `${Math.max(sw, 20)}px`;
-            box.style.height = `${Math.max(sh, 20)}px`;
-
-            const label = document.createElement('div');
-            label.className = 'markup-label';
-            label.textContent = error.id;
-            box.appendChild(label);
+            box.style.width  = `${sw}px`;
+            box.style.height = `${sh}px`;
 
             markupLayer.appendChild(box);
 
-            // Hover sync
+            // ── ADDED: Premium Multi-Line Callout ──────
+            let callout = null;
+            if (error.id || error.category || error.requirement) {
+                const leaderContainer = document.createElement('div');
+                leaderContainer.className = 'markup-leader';
+                
+                // Direction logic (flip if near edges)
+                const dx = scx > (renderW * 0.6) ? -100 : 100;
+                const dy = scy > (renderH * 0.4) ? -60 : 60;
+                
+                // Edge-Snapping Logic: Start from the box edge, not the center
+                const startX = dx > 0 ? (sx + sw) : sx;
+                const startY = scy; // Vertical center of the box
+
+                // Color based on result (Fail=Red, Review=Orange)
+                const lineColor = isReview ? '#f97316' : '#ef4444';
+
+                leaderContainer.innerHTML = `
+                    <svg class="leader-svg" style="position:absolute; left:0; top:0; width:100%; height:100%; overflow:visible; pointer-events:none;">
+                        <path d="M ${startX} ${startY} L ${scx + (dx * 0.4)} ${startY} L ${scx + dx} ${scy + dy}" 
+                               fill="none" stroke="${lineColor}" stroke-width="2" />
+                    </svg>
+                    <div class="requirement-callout" 
+                         style="left:${scx + dx}px; 
+                                top:${scy + dy}px; 
+                                transform: translate(${dx > 0 ? '0' : '-100%'}, -50%);
+                                ${isReview ? 'border-color:#f97316; color:#f97316;' : ''}">
+                        <div class="callout-head" ${isReview ? 'style="color:#f97316; border-color:rgba(249,115,22,0.15);"' : ''}>[${error.id}] ${error.category}</div>
+                        <div class="callout-body">${error.requirement ? error.requirement + ' required' : 'VIOLATION DETECTED'}</div>
+                    </div>
+                `;
+                markupLayer.appendChild(leaderContainer);
+                callout = leaderContainer.querySelector('.requirement-callout');
+            }
+
             const activate = () => {
                 document.querySelectorAll('.bounding-box').forEach(b => b.classList.remove('active'));
                 document.querySelectorAll('#errors-table tr').forEach(r => r.classList.remove('active'));
+                document.querySelectorAll('.requirement-callout').forEach(c => c.classList.remove('active'));
+                document.querySelectorAll('.markup-leader').forEach(l => l.classList.remove('active'));
+                
                 box.classList.add('active');
                 tr.classList.add('active');
+                
+                // FOOLPROOF DEPTH MANAGEMENT: Move elements to the end of the DOM
+                // This forces them to be the topmost rendered elements.
+                markupLayer.appendChild(box);
+                
+                if (callout) {
+                    callout.classList.add('active');
+                    const parent = callout.closest('.markup-leader');
+                    if (parent) {
+                        parent.classList.add('active');
+                        markupLayer.appendChild(parent);
+                    }
+                }
+                
                 tr.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             };
             const deactivate = () => {
                 box.classList.remove('active');
                 tr.classList.remove('active');
+                if (callout) {
+                    callout.classList.remove('active');
+                    const parent = callout.closest('.markup-leader');
+                    if (parent) parent.classList.remove('active');
+                }
             };
 
             tr.addEventListener('mouseenter', activate);
@@ -427,14 +476,11 @@ document.addEventListener('DOMContentLoaded', () => {
             box.addEventListener('mouseenter', activate);
             box.addEventListener('mouseleave', deactivate);
 
-            // Click on table row → jump to that page
             tr.addEventListener('click', () => {
                 const targetPage = error.page_index ?? 0;
                 if (targetPage !== currentPageIdx) showPage(targetPage);
             });
         });
-
-        updateMarkupLayerSize();
     }
 
     // ── Correct rendered-image bounds (object-fit: contain aware) ───────

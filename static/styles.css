@@ -403,13 +403,13 @@ img#drawing-image {
 /* Bounding Box Markups */
 .bounding-box {
     position: absolute;
-    border: 2px solid var(--error-red);
-    background: transparent;
-    box-shadow: 0 0 10px var(--error-red-glow);
-    border-radius: 4px;
+    border: 1.5px solid var(--error-red);
+    background: rgba(239, 68, 68, 0.05);
+    border-radius: 2px;
     transition: all 0.3s ease;
     cursor: crosshair;
     pointer-events: auto;
+    z-index: 10;
 }
 
 /* Orange variant for REVIEW REQUIRED */
@@ -423,15 +423,16 @@ img#drawing-image {
     background: #f97316;
 }
 
-.bounding-box:hover, .bounding-box.active {
-    background: rgba(239, 68, 68, 0.28);
-    border-width: 3px;
-    transform: scale(1.02);
-    z-index: 10;
+.bounding-box.active, .bounding-box:hover {
+    background: rgba(239, 68, 68, 0.2);
+    border-width: 2.5px;
+    box-shadow: 0 0 20px rgba(239, 68, 68, 0.5);
+    z-index: 1000; /* Ensure active box is on top of everything */
 }
 
-.bounding-box.review:hover, .bounding-box.review.active {
-    background: rgba(249, 115, 22, 0.28);
+.bounding-box.review.active, .bounding-box.review:hover {
+    background: rgba(249, 115, 22, 0.15);
+    border-color: #f97316;
 }
 
 .markup-label {
@@ -454,17 +455,89 @@ img#drawing-image {
     opacity: 1;
 }
 
-/* Arrow */
-.markup-arrow {
+/* Architectural Leader Line (Elbow) */
+.markup-leader {
     position: absolute;
-    width: 24px;
-    height: 24px;
-    top: -28px;
-    left: -28px;
-    color: var(--error-red);
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    transition: z-index 0.2s;
 }
-.markup-arrow svg {
-    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
+
+.markup-leader.active {
+    z-index: 2000; /* Secondary safety; DOM order will handle most cases */
+}
+
+.leader-svg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    pointer-events: none;
+}
+
+.requirement-callout {
+    position: absolute;
+    background: #ffffff;
+    color: #ef4444;
+    padding: 7px 10px; /* Reduced padding */
+    border-radius: 10px;
+    border: 1.5px solid #ef4444;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+    z-index: 20;
+    pointer-events: auto;
+    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 140px; /* Reduced min-width */
+}
+
+.requirement-callout.active, .requirement-callout:hover {
+    background: #ef4444; /* Invert to Red on hover */
+    color: #ffffff;      /* White text on hover */
+    transform: scale(1.05) translateY(-4px);
+    box-shadow: 0 12px 30px rgba(239, 68, 68, 0.4);
+    z-index: 110;
+}
+
+.requirement-callout.active .callout-head, .requirement-callout:hover .callout-head {
+    color: white;
+    border-bottom-color: rgba(255, 255, 255, 0.3);
+}
+
+.requirement-callout.active .callout-body, .requirement-callout:hover .callout-body {
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.callout-head {
+    font-size: 0.7rem;
+    font-weight: 800;
+    color: #ef4444;
+    transition: all 0.2s ease;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    border-bottom: 1.5px solid rgba(239, 68, 68, 0.15);
+    padding-bottom: 4px;
+    margin-bottom: 2px;
+}
+
+.callout-body {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #334155; /* Darker slate for readability on white */
+    transition: all 0.2s ease;
+    line-height: 1.3;
+}
+
+.requirement-callout:hover {
+    transform: scale(1.1) translateY(-4px);
+    z-index: 100;
+    box-shadow: 0 15px 40px rgba(239, 68, 68, 0.6);
 }
 
 

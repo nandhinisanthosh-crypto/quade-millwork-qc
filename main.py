@@ -4,7 +4,7 @@ import shutil
 from typing import List
 import base64
 import json
-from PIL import Image
+from PIL import Image, ImageDraw
 from pdf_markup import apply_markups, stitch_images_to_pdf
 
 from fastapi import FastAPI, Request, UploadFile, File, WebSocket, WebSocketDisconnect
@@ -81,6 +81,37 @@ templates = Jinja2Templates(directory=TEMPLATES_DIR)
 # ──────────────────────────────────────────────
 class AnalyzeRequest(BaseModel):
     filename: str
+
+# Calibration
+CALIBRATION_Y_OFFSET = 2.2 # Moves boxes DOWN by 2.2% of page height
+CALIBRATION_X_OFFSET = -0.5 # Moves boxes LEFT by 0.5% of page width
+
+# ──────────────────────────────────────────────
+# SNIPER CONFIGS (Semantic Hints)
+# ──────────────────────────────────────────────
+GLOBAL_DO_NOT_SELECT = [
+    "title block and schedules",
+    "general note blocks",
+    "page numbers",
+    "FINISHED FLOOR line text"
+]
+
+SNIPER_CONFIGS = {
+    "ADA-KNEE-CLEARANCE-27": {
+        "selection_rule": "Select the dimension text/callout that states the vertical knee-clearance height in the ADA Sink Cabinet section. Prefer the offending measurement itself over nearby notes or labels.",
+        "preferred_candidate_terms": ['26" MIN', '27" MIN', '26 1/2"', '27"'],
+        "target_object_type": "dimension_text",
+        "do_not_select": ["B SECTION - ADA SINK CABINET", "ADA KNEE CLEARANCE LINES", '31" A.F.F.']
+    },
+    "ADA-TOE-CLEARANCE-9": {
+        "selection_rule": "Select the dimension text for the toe kick height (vertical clearance from floor).",
+        "preferred_candidate_terms": ['8" MIN', '9" MIN', '8 1/2"'],
+        "target_object_type": "dimension_text",
+        "do_not_select": ["FINISHED FLOOR", "TOE KICK DETAIL"]
+    }
+}
+
+
 
 # ──────────────────────────────────────────────
 # PAGES
@@ -188,35 +219,29 @@ async def delete_drawing(filename: str):
         # Determine the stem (e.g., 'Drawing_A' from 'Drawing_A.pdf')
         stem = filename[:-4] if filename.lower().endswith('.pdf') else filename.rsplit('.', 1)[0]
         
-        # 1. DELETE FROM MAIN DRAWINGS DIRECTORY
-        # Search for any file starting with the stem (markedup PDF, page PNGs, etc.)
-        for f in os.listdir(DRAWINGS_DIR):
-            if f.startswith(stem):
-                try:
-                    os.remove(os.path.join(DRAWINGS_DIR, f))
-                except Exception as e:
-                    logger.error(f"Error removing file {f} from drawings: {e}")
+        # Define all directories that might contain derivatives
+        target_dirs = [DRAWINGS_DIR] + [os.path.join(UPLOADS_DIR, d) for d in DEBUG_DIR_NAMES]
+        
+        purged_count = 0
+        for d_path in target_dirs:
+            if not os.path.exists(d_path): continue
+            
+            for f in os.listdir(d_path):
+                # Match original file OR derivatives (starting with stem followed by separator)
+                # This prevents 'Drawing 1' from deleting 'Drawing 10'
+                # Included '.' to catch thumbnails and direct extension swaps
+                separators = ["_", " ", "-", "."]
+                is_match = (f == filename) or any(f.startswith(stem + s) for s in separators)
+                
+                if is_match:
+                    try:
+                        os.remove(os.path.join(d_path, f))
+                        purged_count += 1
+                    except Exception as e:
+                        logger.error(f"Error purging file {f} in {d_path}: {e}")
 
-        # 2. DELETE FROM ALL AUDIT & DEBUG DIRECTORIES
-        debug_dirs = [
-            "debug_scout_results",
-            "debug_sniper_calls",
-            "debug_sniper_responses",
-            "debug_crops",
-            "debug_logs"
-        ]
-        for d_name in debug_dirs:
-            d_path = os.path.join(UPLOADS_DIR, d_name)
-            if os.path.exists(d_path):
-                for f in os.listdir(d_path):
-                    if f.startswith(stem):
-                        try:
-                            os.remove(os.path.join(d_path, f))
-                        except Exception as e:
-                            logger.error(f"Error cleaning debug file {f}: {e}")
-
-        logger.info(f"Drawing and all related data purged: {filename}")
-        return {"message": "Success (Total Wipe Complete)"}
+        logger.info(f"Drawing and derivatives purged: {filename} ({purged_count} files removed)")
+        return {"message": f"Success. {purged_count} files purged.", "purged_count": purged_count}
         
     return JSONResponse(status_code=404, content={"message": "File not found"})
 
@@ -430,10 +455,27 @@ async def analyze_via_ws(ws: WebSocket):
             gridded_bytes = add_grid_overlay(p_path)
             image_b64 = base64.b64encode(gridded_bytes).decode('utf-8')
             
-            # 2. Extract Text Anchors
+            # 2. Extract Text Anchors & Normalize to Percentages
             anchors = extract_text_map(original_file_path, p_idx)
             page_anchors[p_idx] = anchors # Cache for Stage 2
-            ai_anchors = [{"id": a["id"], "text": a["text"]} for a in anchors]
+            
+            # Get PDF logical dimensions for normalization
+            with fitz.open(original_file_path) as doc:
+                p_rect = doc[p_idx].rect
+                pw, ph = p_rect.width, p_rect.height
+
+            ai_anchors = []
+            for a in anchors:
+                if pw > 0 and ph > 0:
+                    coords_pct = [
+                        round((a["bbox"][0] / pw) * 100.0, 1),
+                        round((a["bbox"][1] / ph) * 100.0, 1),
+                        round((a["bbox"][2] / pw) * 100.0, 1),
+                        round((a["bbox"][3] / ph) * 100.0, 1)
+                    ]
+                    ai_anchors.append({"id": a["id"], "text": a["text"], "coords_pct": coords_pct})
+                else:
+                    ai_anchors.append({"id": a["id"], "text": a["text"]})
             
             # 3. Store Dims for markup scaling
             with Image.open(p_path) as img:
@@ -495,36 +537,109 @@ async def analyze_via_ws(ws: WebSocket):
             rid = m_item.get("rule_id", "Unknown")
             p_idx = m_item["page_index"]
             anchors = page_anchors.get(p_idx, [])
+            img_w, img_h = page_pixel_dims.get(p_idx, (2000, 1500))
+            orig_w = page_dims[p_idx]["width"]
+            orig_h = page_dims[p_idx]["height"]
+            
+            # 1. Get Snippet Metadata
+            config = SNIPER_CONFIGS.get(rid, {})
+            hint_box = m_item.get("bbox_pct", [0,0,100,100])
+            
+            # 2. Filter focus_anchor_ids (Spatial Buffer: 15%)
+            focus_ids = []
+            margin = 15.0
+            search_x0 = max(0, hint_box[0] - margin)
+            search_y0 = max(0, hint_box[1] - margin)
+            search_x1 = min(100, hint_box[2] + margin)
+            search_y1 = min(100, hint_box[3] + margin)
+            
+            for a in anchors:
+                if orig_w > 0 and orig_h > 0:
+                    a_pct_x0 = (a["bbox"][0] / orig_w) * 100.0
+                    a_pct_y0 = (a["bbox"][1] / orig_h) * 100.0
+                    a_pct_x1 = (a["bbox"][2] / orig_w) * 100.0
+                    a_pct_y1 = (a["bbox"][3] / orig_h) * 100.0
+                    
+                    cntr_x = (a_pct_x0 + a_pct_x1) / 2.0
+                    cntr_y = (a_pct_y0 + a_pct_y1) / 2.0
+                    
+                    if search_x0 <= cntr_x <= search_x1 and search_y0 <= cntr_y <= search_y1:
+                        focus_ids.append(a["id"])
+
+            # 3. Build the Structured Request with Grounded Focal Anchors
+            focal_anchors_grounded = []
+            for fid in focus_ids[:60]:
+                match = next((a for a in anchors if a["id"] == fid), None)
+                if match:
+                    ax0, ay0, ax1, ay1 = match["bbox"]
+                    focal_anchors_grounded.append({
+                        "id": fid,
+                        "text": match["text"],
+                        "coords_pct": [
+                            round((ax0 / orig_w) * 100.0, 1),
+                            round((ay0 / orig_h) * 100.0, 1),
+                            round((ax1 / orig_w) * 100.0, 1),
+                            round((ay1 / orig_h) * 100.0, 1)
+                        ]
+                    })
+
+            sniper_request = {
+                "rule_id": rid,
+                "page_index": p_idx,
+                "page_width_px": img_w,
+                "page_height_px": img_h,
+                "focus_detail_title": m_item.get("sheet_or_view", "Unknown View"),
+                "focus_region_hint_pct": hint_box,
+                "target_object_type": config.get("target_object_type", "dimension_text"),
+                "rule_description": m_item.get("note_text", ""),
+                "selection_rule": config.get("selection_rule", f"Select the element that represents the error: {rid}"),
+                "preferred_candidate_terms": config.get("preferred_candidate_terms", []),
+                "focus_anchors": focal_anchors_grounded,
+                "do_not_select": GLOBAL_DO_NOT_SELECT + config.get("do_not_select", [])
+            }
             
             # Use gridded high-res exactly the same as Phase 1
             gridded_bytes = add_grid_overlay(page_images[p_idx][1])
             image_b64 = base64.b64encode(gridded_bytes).decode('utf-8')
             
-            logger.info(f"  [Sniper] Refining {rid} on Full Page {p_idx}...")
+            logger.info(f"  [Sniper] Refining {rid} on Page {p_idx} with {len(focus_ids)} focal anchors...")
             
-            # --- SAVE AUDIT: Sniper Input (Full Prompt + Image + Metadata) ---
-            full_user_text = f"Refine coordinates for error: {rid}\nDescription: {m_item.get('note_text','')}\nPage Anchors:\n{json.dumps(anchors[:1400])}"
-            sniper_input_meta = {
-                "rule_id": rid,
-                "page_index": p_idx,
-                "system_prompt": SNIPER_PROMPT,
-                "full_user_text": full_user_text
-            }
+            # --- SAVE AUDIT ---
             input_log_path = os.path.join(UPLOADS_DIR, "debug_sniper_calls", f"{stem}_{rid}_p{p_idx}_call.json")
             with open(input_log_path, "w", encoding="utf-8") as f:
-                json.dump(sniper_input_meta, f, indent=2)
-                
-            # Save the exact image sent for this sniper call
-            sniper_img_path = os.path.join(UPLOADS_DIR, "debug_sniper_calls", f"{stem}_{rid}_p{p_idx}_call_input.png")
-            with open(sniper_img_path, "wb") as f:
-                f.write(gridded_bytes)
+                json.dump(sniper_request, f, indent=2)
 
+            # SAVE IMAGE for transparency
+            sniper_img_path = os.path.join(UPLOADS_DIR, "debug_sniper_calls", f"{stem}_{rid}_p{p_idx}_call_input.png")
+            try:
+                import io
+                with Image.open(io.BytesIO(gridded_bytes)) as img:
+                    draw = ImageDraw.Draw(img)
+                    # Draw Focus Region Hint (Magenta) - 3px wide
+                    h0, h1, h2, h3 = hint_box
+                    x0 = (h0 / 100.0) * img.width
+                    y0 = (h1 / 100.0) * img.height
+                    x1 = (h2 / 100.0) * img.width
+                    y1 = (h3 / 100.0) * img.height
+                    draw.rectangle([x0, y0, x1, y1], outline="#ff00ff", width=4)
+                    
+                    # Draw Search Buffer (Cyan) - 1px dotted (using small lines)
+                    s0 = (search_x0 / 100.0) * img.width
+                    s1 = (search_y0 / 100.0) * img.height
+                    s2 = (search_x1 / 100.0) * img.width
+                    s3 = (search_y1 / 100.0) * img.height
+                    draw.rectangle([s0, s1, s2, s3], outline="#00ffff", width=2)
+                    
+                    img.save(sniper_img_path)
+            except Exception as e:
+                logger.error(f"Error saving sniper debug image: {e}")
+                
             sniper_response = await client.chat.completions.create(
                 model="gpt-4o",
                 messages=[
                     {"role": "system", "content": SNIPER_PROMPT},
                     {"role": "user", "content": [
-                        {"type": "text", "text": full_user_text},
+                        {"type": "text", "text": json.dumps(sniper_request, indent=2)},
                         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}", "detail": "high"}}
                     ]}
                 ],
@@ -538,23 +653,24 @@ async def analyze_via_ws(ws: WebSocket):
                 f.write(sniper_response.choices[0].message.content)
 
             s_json = json.loads(sniper_response.choices[0].message.content)
+            status = s_json.get("status", "found")
             loc_bbox = s_json.get("refined_bbox_pct")
             
-            if loc_bbox:
-                # Refined Calibration: Shift "A bit more Upper and Little bit Left"
-                # Nudging X by 1.5% (Left) and Y by 5.0% (Up)
-                offset_x = 1.5
-                offset_y = 2.0
-                
+            if status == "found" and loc_bbox:
+                # Apply calibration offsets (moves DOWN and LEFT)
                 calibrated_bbox = [
-                    max(0, loc_bbox[0] - offset_x),
-                    max(0, loc_bbox[1] - offset_y),
-                    max(0, loc_bbox[2] - offset_x),
-                    max(0, loc_bbox[3] - offset_y)
+                    max(0.0, min(100.0, loc_bbox[0] + CALIBRATION_X_OFFSET)),
+                    max(0.0, min(100.0, loc_bbox[1] + CALIBRATION_Y_OFFSET)),
+                    max(0.0, min(100.0, loc_bbox[2] + CALIBRATION_X_OFFSET)),
+                    max(0.0, min(100.0, loc_bbox[3] + CALIBRATION_Y_OFFSET))
                 ]
-                
                 m_item["bbox_pct"] = calibrated_bbox
-                logger.info(f"    -> Refined coordinates (Final Calibration): {m_item['bbox_pct']}")
+                m_item["anchor_id"] = s_json.get("anchor_id")
+                logger.info(f"    -> Refined coordinates: {m_item['bbox_pct']} (Original: {loc_bbox})")
+            elif status == "uncertain":
+                logger.warning(f"    -> Sniper UNCERTAIN for {rid}: {s_json.get('reasoning')}")
+            else:
+                logger.error(f"    -> Sniper NOT_FOUND for {rid}: {s_json.get('reasoning')}")
 
         # ── STEP 5: Final Report & Drawing ──────────────────────
         await ws_send(ws, "step", "🖊️  Step 5/5 — Finalizing Report & Drawing Markups...")
@@ -597,11 +713,18 @@ async def analyze_via_ws(ws: WebSocket):
             if res == "FAIL": severity = "HIGH"
             elif res == "REVIEW REQUIRED": severity = "MEDIUM"
             
+            # Truncate requirement to keep it short
+            req_text = item.get("required_value", "").strip()
+            if len(req_text) > 30: req_text = req_text[:27] + "..."
+            
             if rid not in full_result_map or res == "FAIL":
                 full_result_map[rid] = {
                     "id": f"F-{idx+1:03d}", "category": rid,
                     "error_message": f"{msg} ({rid})",
-                    "standard_ref": f"{res}", "severity": severity, "page_index": 0, "has_bbox": False, "x":0, "y":0, "width":0, "height":0
+                    "standard_ref": f"{res}", 
+                    "severity": severity, 
+                    "requirement": req_text, # ADDED
+                    "page_index": 0, "has_bbox": False, "x":0, "y":0, "width":0, "height":0
                 }
 
         # Enrich with Spatial data
@@ -630,7 +753,10 @@ async def analyze_via_ws(ws: WebSocket):
             
             page_markup_map[p_idx].append({
                 "id": f_id,
-                "bbox_pct": item["bbox_pct"]
+                "bbox_pct": item["bbox_pct"],
+                "rule_id": full_result_map[rid].get("category", ""), # ADDED
+                "requirement": full_result_map[rid].get("requirement", ""),
+                "result": full_result_map[rid].get("standard_ref", "FAIL")
             })
             
         marked_up_pages = {}
