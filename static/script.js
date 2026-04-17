@@ -14,6 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const markupLayer       = document.getElementById('markup-layer');
     const errorCountBadge   = document.getElementById('error-count-badge');
     const errorsTableBody   = document.querySelector('#errors-table tbody');
+    const qcGradeBadge      = document.getElementById('qc-grade-badge');
 
     // Page navigation
     const pageNav           = document.getElementById('page-nav');
@@ -86,6 +87,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 markupLayer.innerHTML = '';
                 errorCountBadge.textContent = '0 Issues';
                 pageNav.style.display = 'none';
+                if (qcGradeBadge) qcGradeBadge.style.display = 'none';
             }
         }
     }
@@ -111,6 +113,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Initial show once data is in
                 showPage(0);
                 renderErrors();
+                if (data.grade) {
+                    renderGrade(data.grade);
+                }
                 
                 // If there are results, show the Count Badge correctly
                 errorCountBadge.textContent = `${currentErrors.length} Issues`;
@@ -248,6 +253,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         resetPipelineSteps();
         currentStepIndex = -1;
+        if (qcGradeBadge) qcGradeBadge.style.display = 'none';
         loadingOverlay.classList.add('active');
 
         const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
@@ -287,6 +293,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.info('[QC Summary]', data.executive_summary);
                 }
 
+                // Render QC Grade if present
+                if (data.grade) {
+                    renderGrade(data.grade);
+                }
+
         setTimeout(() => {
                     loadingOverlay.classList.remove('active');
                     document.querySelector('.empty-state').style.display = 'none';
@@ -324,6 +335,23 @@ document.addEventListener('DOMContentLoaded', () => {
         if (message.includes('Step 3') || message.toLowerCase().includes('vision') || message.toLowerCase().includes('analyzing')) return 2;
         if (message.includes('Step 4') || message.toLowerCase().includes('markup'))        return 3;
         return Math.max(0, currentStepIndex);
+    }
+
+    // ── Render QC Grade Badge ───────────────────────────────────────────
+    function renderGrade(grade) {
+        if (!grade) {
+            qcGradeBadge.style.display = 'none';
+            return;
+        }
+        qcGradeBadge.textContent = grade.label;
+        qcGradeBadge.style.display = 'inline-flex';
+        
+        // Apply status colors
+        qcGradeBadge.style.setProperty('--badge-color', '#fff');
+        qcGradeBadge.style.setProperty('--badge-bg', grade.color + '20'); // 20 opacity
+        qcGradeBadge.style.setProperty('--badge-border', grade.color + '60'); // 60 opacity
+        qcGradeBadge.style.setProperty('--glow-color', grade.color + '40'); // Glowing effect
+        qcGradeBadge.style.color = grade.color;
     }
 
     // ── Render Errors + Markups ──────────────────────────────────────────

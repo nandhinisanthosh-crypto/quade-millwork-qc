@@ -313,6 +313,23 @@ h1, h2, h3 {
     border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
+.grade-badge {
+    padding: 6px 14px;
+    border-radius: 24px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 0 15px var(--glow-color, transparent);
+    background: var(--badge-bg, rgba(255, 255, 255, 0.05));
+    color: var(--badge-color, #fff);
+    border: 1.5px solid var(--badge-border, rgba(255, 255, 255, 0.1));
+    transition: var(--transition);
+}
+
 /* Canvas Area */
 .canvas-container {
     flex: 1;

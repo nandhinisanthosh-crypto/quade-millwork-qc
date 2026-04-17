@@ -798,8 +798,36 @@ async def analyze_via_ws(ws: WebSocket):
                 # Use the original clean PNG for this page
                 final_image_paths.append(p_path)
         
+        # ── COMPLETE ─────────────────────────────────────────────────────
+        # --- QC GRADING LOGIC ---
+        pages_count = len(page_images) or 1
+        critical_count = sum(1 for e in frontend_errors if e.get("severity") == "HIGH")
+        basic_count = sum(1 for e in frontend_errors if e.get("severity") == "MEDIUM")
+        density = (basic_count + (critical_count * 2)) / pages_count
+        
+        grade_info = {"score": round(density, 2), "label": "UNACCEPTABLE", "color": "#7f1d1d"}
+        if density < 1.0:
+            grade_info = {"score": round(density, 2), "label": "EXCELLENT", "color": "#10b981"}
+        elif density < 3.0:
+            grade_info = {"score": round(density, 2), "label": "NEEDS CORRECTION", "color": "#f97316"}
+        elif density < 6.0:
+            grade_info = {"score": round(density, 2), "label": "NEEDS IMPROVEMENT", "color": "#f43f5e"}
+
+        results_data = {
+            "errors": frontend_errors,
+            "summary": {
+                "total": len(frontend_errors), 
+                "fails": critical_count,
+                "reviews": basic_count
+            },
+            "grade": grade_info,
+            "page_count": pages_count,
+            "marked_up_pages": marked_up_pages, 
+            "stem": stem
+        }
+
         try:
-            success = stitch_images_to_pdf(final_image_paths, pdf_out_path)
+            success = stitch_images_to_pdf(final_image_paths, pdf_out_path, results_data=results_data)
             if success:
                 marked_up_pdf_url = f"/drawings/{pdf_out_name}"
                 logger.info(f"PDF Report (Stitched) generated: {pdf_out_name} with {len(final_image_paths)} pages.")
@@ -809,17 +837,7 @@ async def analyze_via_ws(ws: WebSocket):
             logger.error(f"Failed to generate Stitched PDF Report: {e}")
             marked_up_pdf_url = ""
 
-        # ── COMPLETE ─────────────────────────────────────────────────────
-        logger.info(f"Analysis complete for {filename}. Findings: {len(frontend_errors)}")
-        
-        results_data = {
-            "errors": frontend_errors,
-            "summary": {"total": len(frontend_errors), "fails": sum(1 for e in frontend_errors if e.get("severity") == "FAIL")},
-            "page_count": len(page_images),
-            "marked_up_pages": marked_up_pages, 
-            "marked_up_pdf_url": marked_up_pdf_url,
-            "stem": stem
-        }
+        results_data["marked_up_pdf_url"] = marked_up_pdf_url
 
         # PERSIST RESULTS TO DISK
         try:
