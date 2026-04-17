@@ -104,7 +104,8 @@ def apply_markups(pdf_path: str, markup_plan: any, output_path: str):
             x1 = (x1p / 100.0) * pw
             y1 = (y1p / 100.0) * ph
 
-            rect = fitz.Rect(x0, y0, x1, y1)
+            # Add padding (15 points) for better visibility
+            rect = fitz.Rect(x0 - 15, y0 - 15, x1 + 15, y1 + 15)
             if rect.is_empty or rect.is_infinite: continue
 
             # Draw rectangle outline

@@ -130,8 +130,9 @@ def draw_markups_on_image(image_path: str, markup_items: list[dict], output_path
                 x1 = (bx[2] / 100.0) * w
                 y1 = (bx[3] / 100.0) * h
                 
-                # Draw bounding box
-                draw.rectangle([x0, y0, x1, y1], outline="#ef4444", width=line_width)
+                # Draw bounding box with padding
+                pad = int(min(w, h) * 0.015) # 1.5% padding
+                draw.rectangle([x0 - pad, y0 - pad, x1 + pad, y1 + pad], outline="#ef4444", width=line_width)
                 
                 # ── LEADER LINE & LABEL ──────────────────────────────────
                 # Determine placement: try to avoid edges
