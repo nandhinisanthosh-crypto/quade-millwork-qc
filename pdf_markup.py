@@ -10,15 +10,15 @@ import os
 def draw_annotated_callout(page, rect, finding_id, rule_id, requirement, color):
     """Draws a premium two-line callout."""
     ax, ay = rect.x0, rect.y0
-    dx = -60 if ax > 60 else 60
-    dy = -40 if ay > 40 else 40
+    dx = -70 if ax > 70 else 70
+    dy = -50 if ay > 50 else 50
     
     p1 = fitz.Point(ax, ay)
     p2 = fitz.Point(ax + dx, ay + dy)
     page.draw_line(p1, p2, color=color, width=1.2)
     
     # Text Block
-    bw, bh = 150, 24
+    bw, bh = 180, 32
     bx = p2.x if dx > 0 else p2.x - bw
     by = p2.y - (bh / 2)
     box = fitz.Rect(bx, by, bx + bw, by + bh)
@@ -27,7 +27,7 @@ def draw_annotated_callout(page, rect, finding_id, rule_id, requirement, color):
     
     # Combine ID, Rule and Requirement
     full_text = f"[{finding_id}] {rule_id}\n{requirement} required"
-    page.insert_textbox(box, full_text, fontsize=7, color=color, align=1)
+    page.insert_textbox(box, full_text, fontsize=10, color=color, align=1)
 
 
 def apply_markups(pdf_path: str, markup_plan: any, output_path: str):

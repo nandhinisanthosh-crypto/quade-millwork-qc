@@ -100,12 +100,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 currentErrors = data.errors || [];
                 markedUpPdfUrl = data.marked_up_pdf_url || '';
                 
-                // Update page URLs to use marked-up ones if available
-                if (data.marked_up_pages) {
-                    for (const [pIdx, url] of Object.entries(data.marked_up_pages)) {
-                        allPageUrls[pIdx] = url;
-                    }
-                } else if (data.stem && data.page_count) {
+                // Ensure we use clean drawing URLs, not marked-up ones, for the viewer
+                if (data.stem && data.page_count) {
                     allPageUrls = [];
                     for (let i = 0; i < data.page_count; i++) {
                         allPageUrls.push(`/drawings/${data.stem}_page_${i}.png`);
